@@ -67,7 +67,8 @@ curl https://localhost:5001/.well-known/openid-configuration
 {
   "Clients": {
     "ScalarClient": { "Secret": "dev-secret" },
-    "AdminClient": { "Secret": "dev-admin-secret" }
+    "AdminClient": { "Secret": "dev-admin-secret" },
+    "WatcherClient": { "Secret": "dev-watcher-secret" }
   },
   "SeedUsers": { "AdminPassword": "Admin1234!" }
 }

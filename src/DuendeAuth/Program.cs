@@ -22,9 +22,9 @@ builder.Services
     .AddIdentityServer()
     .AddAspNetIdentity<IdentityUser>()
     .AddDeveloperSigningCredential()
-    .AddInMemoryApiScopes(Config.ApiScopes)
-    .AddInMemoryApiResources(Config.ApiResources)
-    .AddInMemoryClients(Config.GetClients(builder.Configuration))
+    .AddConfigurationStore(options =>
+        options.ConfigureDbContext = b =>
+            b.UseConfiguredProvider(builder.Configuration, ConnectionStringNames.Config, ConnectionStringNames.ConfigMigrationsAssembly))
     .AddOperationalStore(options =>
         options.ConfigureDbContext = b =>
             b.UseConfiguredProvider(builder.Configuration, ConnectionStringNames.Grants, ConnectionStringNames.GrantsMigrationsAssembly));
@@ -33,15 +33,22 @@ builder.Services.AddAuthentication()
     .AddJwtBearer(options =>
     {
         options.Authority = builder.Configuration[ConfigKeys.Authority];
-        options.TokenValidationParameters.ValidAudience = Scopes.DuendeAdmin;
+        options.TokenValidationParameters.ValidAudiences = [Scopes.DuendeManage, Scopes.DuendeRead];
     });
 
 builder.Services.AddAuthorization(options =>
+{
     options.AddPolicy(PolicyNames.Admin, policy =>
     {
         policy.AuthenticationSchemes.Add(JwtBearerDefaults.AuthenticationScheme);
-        policy.RequireClaim("scope", Scopes.DuendeAdmin);
-    }));
+        policy.RequireClaim("scope", Scopes.DuendeManage);
+    });
+    options.AddPolicy(PolicyNames.AdminRead, policy =>
+    {
+        policy.AuthenticationSchemes.Add(JwtBearerDefaults.AuthenticationScheme);
+        policy.RequireClaim("scope", Scopes.DuendeManage, Scopes.DuendeRead);
+    });
+});
 
 builder.Services.AddProblemDetails();
 
@@ -63,7 +70,7 @@ builder.Services.AddOpenApi(options =>
                         TokenUrl = new Uri($"{authority}/connect/token"),
                         Scopes = new Dictionary<string, string>
                         {
-                            [Scopes.DuendeAdmin] = "DuendeAuth Admin API"
+                            [Scopes.DuendeManage] = "Full management access (users, claims, clients)"
                         }
                     }
                 }
