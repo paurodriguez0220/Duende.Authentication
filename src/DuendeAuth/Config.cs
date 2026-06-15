@@ -5,12 +5,14 @@ public static class Config
 {
     public static IEnumerable<ApiScope> ApiScopes =>
     [
-        new ApiScope(Scopes.ScalarApi, "Scalar API")
+        new ApiScope(Scopes.ScalarApi, "Scalar API"),
+        new ApiScope(Scopes.DuendeAdmin, "DuendeAuth Admin API")
     ];
 
     public static IEnumerable<ApiResource> ApiResources =>
     [
-        new ApiResource(Scopes.ScalarApi, "Scalar API") { Scopes = { Scopes.ScalarApi } }
+        new ApiResource(Scopes.ScalarApi, "Scalar API") { Scopes = { Scopes.ScalarApi } },
+        new ApiResource(Scopes.DuendeAdmin, "DuendeAuth Admin API") { Scopes = { Scopes.DuendeAdmin } }
     ];
 
     public static IEnumerable<Client> GetClients(IConfiguration configuration) =>
@@ -28,6 +30,19 @@ public static class Config
             AllowedGrantTypes = GrantTypes.ClientCredentials,
             AllowedScopes = { Scopes.ScalarApi },
             AllowedCorsOrigins = { CorsOrigins.ScalarApiLocal }
+        },
+        new Client
+        {
+            ClientId = ClientIds.AdminClient,
+            ClientSecrets =
+            {
+                new Secret(
+                    (configuration[ConfigKeys.AdminClientSecret]
+                        ?? throw new InvalidOperationException($"{ConfigKeys.AdminClientSecret} is not configured."))
+                    .Sha256())
+            },
+            AllowedGrantTypes = GrantTypes.ClientCredentials,
+            AllowedScopes = { Scopes.DuendeAdmin }
         }
     ];
 }

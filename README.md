@@ -21,7 +21,10 @@ Create `src/DuendeAuth/appsettings.Development.json` before running (this file i
 
 ```json
 {
-  "Clients": { "ScalarClient": { "Secret": "dev-secret" } },
+  "Clients": {
+    "ScalarClient": { "Secret": "dev-secret" },
+    "AdminClient": { "Secret": "dev-admin-secret" }
+  },
   "SeedUsers": { "AdminPassword": "Admin1234!" }
 }
 ```
@@ -69,6 +72,7 @@ Secrets go in `appsettings.Development.json` (gitignored) or environment variabl
 | `ConnectionStrings:IdentityConnection` | `appsettings.json` | Connection string for ASP.NET Core Identity tables |
 | `ConnectionStrings:GrantsConnection` | `appsettings.json` | Connection string for Duende operational grants tables |
 | `Clients:ScalarClient:Secret` | `appsettings.Development.json` | Client secret for the ScalarApi OAuth2 client |
+| `Clients:AdminClient:Secret` | `appsettings.Development.json` | Client secret for the admin API OAuth2 client |
 | `SeedUsers:AdminPassword` | `appsettings.Development.json` | Password for the seeded admin user |
 
 ---
@@ -143,6 +147,24 @@ Separate files mean each `DbContext` owns its database file and `EnsureCreated()
 Duende's automatic key management stores signing keys in the `Keys` table (in the grants database). This feature requires a paid Business or Enterprise license.
 
 `AddDeveloperSigningCredential()` instead writes a signing key to a local `tempkey.jwk` file and reads it back on restart. It requires no database table, no license, and is appropriate for development and personal use. It is **not suitable for production** because the key is not shared across multiple instances.
+
+---
+
+## Admin API
+
+DuendeAuth ships with a built-in admin API at `/admin`. All endpoints require a valid JWT with the `duende-admin` scope, obtained via the `admin-client` OAuth2 client.
+
+**Try it:** Start the server and open `https://localhost:5001/scalar/v1`. Authenticate using `admin-client` / `dev-admin-secret`, then the admin endpoints are available under the Admin tag.
+
+| Method | Route | Description |
+|---|---|---|
+| `GET` | `/admin/users` | List all users |
+| `POST` | `/admin/users` | Create a user (body: `{ "userName", "email", "password" }`) |
+| `DELETE` | `/admin/users/{id}` | Delete a user |
+| `GET` | `/admin/users/{id}/claims` | List a user's custom claims |
+| `POST` | `/admin/users/{id}/claims` | Add a claim (body: `{ "type", "value" }`) |
+| `DELETE` | `/admin/users/{id}/claims/{type}` | Remove a claim by type |
+| `GET` | `/admin/clients` | List registered OAuth2 clients |
 
 ---
 

@@ -13,6 +13,8 @@
 **/appsettings.Development.json
 **/appsettings.Local.json
 *.db
+*.db-shm
+*.db-wal
 tempkey.jwk
 
 # User-specific files (MonoDevelop/Xamarin Studio)

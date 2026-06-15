@@ -16,6 +16,9 @@ DuendeAuth is the long-lived service. Every new personal project registers as a 
 ```
 src/
   DuendeAuth/              Standalone auth server (duende.sln)
+    Admin/                 Admin API endpoints and models
+      Models/              DTOs and request records
+      AdminEndpoints.cs    Minimal API handlers (users, claims, clients)
     Common/Constants/      Named constants (no magic strings)
     Infrastructure/
       DbContextOptionsFactory.cs   DB provider abstraction
@@ -62,7 +65,10 @@ curl https://localhost:5001/.well-known/openid-configuration
 **`src/DuendeAuth/appsettings.Development.json`**
 ```json
 {
-  "Clients": { "ScalarClient": { "Secret": "dev-secret" } },
+  "Clients": {
+    "ScalarClient": { "Secret": "dev-secret" },
+    "AdminClient": { "Secret": "dev-admin-secret" }
+  },
   "SeedUsers": { "AdminPassword": "Admin1234!" }
 }
 ```
