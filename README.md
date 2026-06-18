@@ -125,6 +125,28 @@ Keeping them separate ensures `EnsureCreated()` works correctly for each context
 
 ---
 
+## Dependencies
+
+| Dependency | Purpose |
+| --- | --- |
+| `Duende.IdentityServer.AspNetIdentity` | OIDC/OAuth 2.0 protocol engine with ASP.NET Core Identity integration |
+| `Duende.IdentityServer.EntityFramework` | Persists operational grants and configuration (clients, scopes) to a database |
+| `Microsoft.AspNetCore.Identity.EntityFrameworkCore` | User and role management backed by EF Core |
+| `Microsoft.AspNetCore.Authentication.JwtBearer` | Validates JWTs on the admin API endpoints |
+| `Microsoft.AspNetCore.OpenApi` | Generates OpenAPI metadata consumed by the Scalar UI |
+| `Microsoft.EntityFrameworkCore.Sqlite` | EF Core provider for SQLite (default for local development) |
+| `Microsoft.EntityFrameworkCore.SqlServer` | EF Core provider for SQL Server (production option) |
+| `Npgsql.EntityFrameworkCore.PostgreSQL` | EF Core provider for PostgreSQL (production option) |
+| `Serilog.AspNetCore` | Structured request logging middleware |
+| `Serilog.Formatting.Compact` | Compact JSON log formatter used by Serilog |
+| `Scalar.AspNetCore` | Interactive API reference UI served at `/scalar/v1` |
+| Azure App Service | Hosts the auth server in production |
+| Azure Database for PostgreSQL | Managed PostgreSQL for the three EF Core databases in production |
+| Azure Key Vault | Stores client secrets and connection strings in production |
+| Azure Application Insights | Telemetry and monitoring in production |
+
+---
+
 ## Configuration
 
 Secrets go in `appsettings.Development.json` (gitignored) or environment variables. Never commit secrets to `appsettings.json`.
