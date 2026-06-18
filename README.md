@@ -1,43 +1,52 @@
 # DuendeAuth
 
-A self-hosted OpenID Connect / OAuth 2.0 auth server built on [Duende IdentityServer](https://duendesoftware.com/products/identityserver). Designed to run once and be reused across all personal projects.
+A self-hosted OpenID Connect / OAuth 2.0 identity server built on [Duende IdentityServer](https://duendesoftware.com/products/identityserver) and ASP.NET Core Identity, used as the shared authentication authority for all personal projects.
 
 ---
 
 ## Getting Started
 
 **Prerequisites:**
-- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
-- (Optional) PostgreSQL or SQL Server for production deployments
 
-**Clone and run:**
+- [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
+- (Optional) PostgreSQL or SQL Server for production deployments — SQLite works out of the box for local dev
+
+**Clone and first-time setup:**
 
 ```bash
 git clone <repo-url>
-cd duende
+cd duende-auth
 ```
 
-Create `src/DuendeAuth/appsettings.Development.json` before running (this file is gitignored — never commit it):
+`appsettings.Development.json` is gitignored. Create it before running — the app will throw on startup without it:
 
+**`src/DuendeAuth/appsettings.Development.json`**
 ```json
 {
   "Clients": {
     "ScalarClient": { "Secret": "dev-secret" },
-    "AdminClient": { "Secret": "dev-admin-secret" }
+    "AdminClient": { "Secret": "dev-admin-secret" },
+    "WatcherClient": { "Secret": "dev-watcher-secret" }
   },
   "SeedUsers": { "AdminPassword": "Admin1234!" }
 }
 ```
 
+**Run:**
+
 ```bash
 dotnet run --project src/DuendeAuth --launch-profile https
 ```
 
-Verify the server is up:
+**Verify the server is up:**
 
 ```bash
 curl https://localhost:5001/.well-known/openid-configuration
 ```
+
+**Explore the API interactively:**
+
+Open `https://localhost:5001/scalar/v1` in your browser. Authenticate using the `admin-client` / `dev-admin-secret` credentials to access the admin endpoints.
 
 ---
 
@@ -45,154 +54,141 @@ curl https://localhost:5001/.well-known/openid-configuration
 
 | Command | What it does |
 | --- | --- |
-| `dotnet build duende.sln` | Build the auth server |
-| `dotnet run --project src/DuendeAuth --launch-profile https` | Start on https://localhost:5001 |
-| `curl https://localhost:5001/.well-known/openid-configuration` | Verify the server is healthy |
+| `dotnet build duende.sln` | Build the solution |
+| `dotnet run --project src/DuendeAuth --launch-profile https` | Start the auth server on https://localhost:5001 |
+| `dotnet test duende.sln` | Run all unit tests |
+| `curl https://localhost:5001/.well-known/openid-configuration` | Verify OIDC discovery endpoint is healthy |
+| `cd tests/e2e && npx playwright test` | Run Playwright end-to-end tests |
 
 ---
 
 ## Architecture
 
-DuendeAuth is a standalone auth server that handles authentication and authorization for all personal projects. Client apps register in `Config.cs` and point their JWT authority at this server's URL.
+DuendeAuth is a standalone auth server that runs once and is shared by all personal projects. Client apps register in `Config.cs` and point their JWT authority at this server's URL (`https://localhost:5001` locally, or the deployed Azure App Service URL in production).
 
-Key components:
-- **ASP.NET Core Identity** — user management (stored in SQLite by default, Postgres or SQL Server in production)
-- **Duende IdentityServer** — OIDC and OAuth 2.0 endpoints
-- **DbContextOptionsFactory** — Factory Method + Strategy pattern for switching database providers via config
+### Design patterns
+
+**Options pattern** — All secrets and provider settings are read from `IConfiguration` using strongly typed keys in `Common/Constants/ConfigKeys.cs`. No inline strings appear in application code.
+
+**Strategy + Factory Method (`DbContextOptionsFactory`)** — A single extension method `UseConfiguredProvider` reads the `Database:Provider` config key at runtime and selects the appropriate EF Core provider (SQLite, PostgreSQL, or SQL Server). Adding a new database backend requires only one new `case` in the switch — `Program.cs` and all three `DbContext` registrations remain unchanged.
+
+**Minimal API with endpoint grouping** — All admin routes live in `AdminEndpoints.cs` and are registered as a single call (`app.MapAdminEndpoints()`). Routes are grouped by resource (`/api/v1/users`, `/api/v1/clients`), with shared middleware (authorization policy, rate limiter) applied at the group level.
+
+**Middleware pipeline** — Custom security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`) and structured request logging via Serilog are added as middleware in `Program.cs`.
+
+**Seed pattern** — `SeedData.InitializeAsync` runs on startup to create database schemas and seed the admin user and OIDC configuration idempotently (checks before inserting).
+
+**Cursor-based pagination** — The `GET /api/v1/users` endpoint uses opaque Base64 cursors rather than page offsets, making pagination stable under concurrent inserts.
+
+### Key components
+
+| Component | Location | Purpose |
+| --- | --- | --- |
+| `Program.cs` | `src/DuendeAuth/` | App composition root — service registration and middleware pipeline |
+| `Config.cs` | `src/DuendeAuth/` | In-memory client, scope, and resource registration |
+| `DbContextOptionsFactory.cs` | `Infrastructure/` | Strategy/Factory for database provider selection |
+| `AdminEndpoints.cs` | `Admin/` | Minimal API handlers for users, claims, and clients |
+| `SeedData.cs` | `Data/` | Startup seeder for schemas, OIDC config, and admin user |
+| `Common/Constants/` | `Common/Constants/` | Named constants — no magic strings anywhere in the codebase |
+| `infra/duende/` | `infra/duende/` | Azure Bicep templates (App Service, PostgreSQL, Key Vault, App Insights) |
+| `tests/e2e/` | `tests/e2e/` | Playwright end-to-end tests covering auth, users, and clients |
+
+### External dependencies
+
+| Package | Purpose |
+| --- | --- |
+| `Duende.IdentityServer.AspNetIdentity` | OIDC/OAuth 2.0 protocol implementation |
+| `Duende.IdentityServer.EntityFramework` | Persisted configuration and operational stores |
+| `Microsoft.AspNetCore.Identity.EntityFrameworkCore` | User and role management |
+| `Npgsql.EntityFrameworkCore.PostgreSQL` | PostgreSQL EF Core provider |
+| `Microsoft.EntityFrameworkCore.SqlServer` | SQL Server EF Core provider |
+| `Microsoft.EntityFrameworkCore.Sqlite` | SQLite EF Core provider (default for dev) |
+| `Serilog.AspNetCore` | Structured logging with compact JSON formatter |
+| `Scalar.AspNetCore` | Interactive API reference UI at `/scalar/v1` |
+| `Microsoft.AspNetCore.Authentication.JwtBearer` | JWT validation for the admin API |
+
+### Signing credentials
+
+In development, `AddDeveloperSigningCredential()` writes a signing key to `tempkey.jwk` (no database or license required). In production, Duende's automatic key management stores and rotates keys via the operational store.
+
+### Three separate databases
+
+Three `DbContext` classes map to three databases (or three schemas/databases in Postgres/SQL Server):
+
+| Database | Purpose |
+| --- | --- |
+| `IdentityConnection` | ASP.NET Core Identity — users and roles |
+| `GrantsConnection` | Duende operational store — persisted grants and device codes |
+| `ConfigConnection` | Duende configuration store — clients, scopes, and resources |
+
+Keeping them separate ensures `EnsureCreated()` works correctly for each context in SQLite, and maps cleanly to separate databases in PostgreSQL production.
 
 ---
 
 ## Configuration
 
-Secrets go in `appsettings.Development.json` (gitignored) or environment variables — never in `appsettings.json`.
+Secrets go in `appsettings.Development.json` (gitignored) or environment variables. Never commit secrets to `appsettings.json`.
 
-| Key | Source | Description |
+| Key | Default | Description |
 | --- | --- | --- |
-| `Database:Provider` | `appsettings.json` | Database provider: `sqlite` (default), `postgres`, `sqlserver` |
-| `ConnectionStrings:IdentityConnection` | `appsettings.json` | Connection string for ASP.NET Core Identity tables |
-| `ConnectionStrings:GrantsConnection` | `appsettings.json` | Connection string for Duende operational grants tables |
-| `Clients:ScalarClient:Secret` | `appsettings.Development.json` | Client secret for the ScalarApi OAuth2 client |
-| `Clients:AdminClient:Secret` | `appsettings.Development.json` | Client secret for the admin API OAuth2 client |
-| `SeedUsers:AdminPassword` | `appsettings.Development.json` | Password for the seeded admin user |
+| `Database:Provider` | `sqlite` | Database provider: `sqlite`, `postgres`, or `sqlserver` |
+| `ConnectionStrings:IdentityConnection` | `Data Source=duende-identity.db` | Connection string for ASP.NET Core Identity tables |
+| `ConnectionStrings:GrantsConnection` | `Data Source=duende-grants.db` | Connection string for Duende operational grant tables |
+| `ConnectionStrings:ConfigConnection` | `Data Source=duende-config.db` | Connection string for Duende configuration tables |
+| `Auth:Authority` | `https://localhost:5001` | OIDC authority URL used for JWT validation in the admin API |
+| `Clients:ScalarClient:Secret` | *(required)* | Client secret for the ScalarApi OAuth2 client |
+| `Clients:AdminClient:Secret` | *(required)* | Client secret for the admin management OAuth2 client |
+| `Clients:WatcherClient:Secret` | *(required)* | Client secret for the read-only watcher OAuth2 client |
+| `SeedUsers:AdminPassword` | *(required)* | Password for the seeded admin user (created on first startup) |
 
----
-
-## Architecture decisions
-
-### Why Duende IdentityServer?
-
-Rolling your own auth is one of the most reliable ways to introduce security vulnerabilities. Duende implements the OpenID Connect and OAuth 2.0 specs correctly, is actively maintained, and is the direct successor to the widely-used IdentityServer4. For personal/non-commercial use the community license is free.
-
----
-
-### Why is the DB provider abstracted? (`DbContextOptionsFactory`)
-
-**The problem it solves:**
-
-DuendeAuth is meant to be reused across different environments:
-- Local dev → SQLite (zero setup, file-based)
-- Shared server / production → Postgres or SQL Server (proper concurrent access, backups, etc.)
-
-Without abstraction, switching databases means editing `Program.cs` every time — coupling infrastructure decisions to application code.
-
-**The pattern used:**
-
-`DbContextOptionsFactory` combines two patterns:
-
-- **Factory Method** — a single method (`UseConfiguredProvider`) is responsible for constructing the right `DbContextOptionsBuilder` based on input. The caller never knows which provider it gets.
-- **Strategy** — the `Database:Provider` config key selects the algorithm (which EF Core provider to wire up) at runtime. Adding a new provider means adding one `case` to the switch — nothing else changes.
-
-**What this looks like in practice:**
-
-```csharp
-// Program.cs — caller knows nothing about SQLite, Postgres, or SQL Server
-builder.Services.AddDbContext<ApplicationDbContext>(opt =>
-    opt.UseConfiguredProvider(config, "IdentityConnection"));
-```
-
-```csharp
-// DbContextOptionsFactory.cs — all provider knowledge lives here
-return provider switch
-{
-    "postgres"  => builder.UseNpgsql(connStr, ...),
-    "sqlserver" => builder.UseSqlServer(connStr, ...),
-    _           => builder.UseSqlite(connStr, ...)
-};
-```
-
-**To switch databases you only touch config, never code:**
+**PostgreSQL example (`appsettings.json`):**
 
 ```json
-{ "Database": { "Provider": "postgres" } }
+{
+  "Database": { "Provider": "postgres" },
+  "ConnectionStrings": {
+    "IdentityConnection": "Host=...;Database=duende-identity;Username=...;Password=...;SslMode=Require;",
+    "GrantsConnection":   "Host=...;Database=duende-grants;Username=...;Password=...;SslMode=Require;",
+    "ConfigConnection":   "Host=...;Database=duende-config;Username=...;Password=...;SslMode=Require;"
+  }
+}
 ```
 
-**Why not just use environment-specific `appsettings` files?**
+Credentials always go in `appsettings.Development.json` or environment variables — never in the committed `appsettings.json`.
 
-You could put `UseNpgsql(...)` directly in `Program.cs` and swap it per environment. But then the code has a direct dependency on a specific provider — anyone reading it has to know that SQLite is for dev and Postgres for prod, and any new environment requires a code change and a redeploy. The factory keeps that concern in one place.
+### Registering a new client app
 
----
+1. Add a `Client` entry in `src/DuendeAuth/Config.cs` → `Config.GetClients()`
+2. Add its secret to `appsettings.Development.json` (gitignored) and expose it via Key Vault in production
+3. In the new app, point `Auth:Authority` at `https://localhost:5001` (dev) or the deployed URL (prod)
 
-### Why two separate SQLite files (`duende-identity.db` and `duende-grants.db`)?
+### Admin API
 
-EF Core's `EnsureCreated()` only creates a database if it does not exist yet. When two `DbContext` classes share the same file, the first one to run creates the file and its own tables — the second one sees the file already exists and does nothing, leaving its tables missing.
+All endpoints require a JWT with the `duende-manage` scope. Obtain a token via the `admin-client` OAuth2 client using the Client Credentials flow.
 
-Separate files mean each `DbContext` owns its database file and `EnsureCreated()` works correctly for both.
+| Method | Route | Scope required | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/v1/users` | `duende-read` or `duende-manage` | List users (cursor-paginated) |
+| `POST` | `/api/v1/users` | `duende-manage` | Create a user |
+| `DELETE` | `/api/v1/users/{id}` | `duende-manage` | Delete a user |
+| `GET` | `/api/v1/users/{id}/claims` | `duende-read` or `duende-manage` | List a user's custom claims |
+| `POST` | `/api/v1/users/{id}/claims` | `duende-manage` | Add a claim to a user |
+| `DELETE` | `/api/v1/users/{id}/claims/{type}` | `duende-manage` | Remove a claim by type |
+| `GET` | `/api/v1/clients` | `duende-read` or `duende-manage` | List registered OAuth2 clients |
+| `POST` | `/api/v1/clients` | `duende-manage` | Register a new OAuth2 client |
+| `DELETE` | `/api/v1/clients/{clientId}` | `duende-manage` | Delete a client |
 
-> For production use with Postgres or SQL Server, use proper EF Core migrations (`dotnet ef migrations add`) and separate schemas or databases per context.
-
----
-
-### Why `AddDeveloperSigningCredential()`?
-
-Duende's automatic key management stores signing keys in the `Keys` table (in the grants database). This feature requires a paid Business or Enterprise license.
-
-`AddDeveloperSigningCredential()` instead writes a signing key to a local `tempkey.jwk` file and reads it back on restart. It requires no database table, no license, and is appropriate for development and personal use. It is **not suitable for production** because the key is not shared across multiple instances.
-
----
-
-## Admin API
-
-DuendeAuth ships with a built-in admin API at `/admin`. All endpoints require a valid JWT with the `duende-admin` scope, obtained via the `admin-client` OAuth2 client.
-
-**Try it:** Start the server and open `https://localhost:5001/scalar/v1`. Authenticate using `admin-client` / `dev-admin-secret`, then the admin endpoints are available under the Admin tag.
-
-| Method | Route | Description |
-|---|---|---|
-| `GET` | `/admin/users` | List all users |
-| `POST` | `/admin/users` | Create a user (body: `{ "userName", "email", "password" }`) |
-| `DELETE` | `/admin/users/{id}` | Delete a user |
-| `GET` | `/admin/users/{id}/claims` | List a user's custom claims |
-| `POST` | `/admin/users/{id}/claims` | Add a claim (body: `{ "type", "value" }`) |
-| `DELETE` | `/admin/users/{id}/claims/{type}` | Remove a claim by type |
-| `GET` | `/admin/clients` | List registered OAuth2 clients |
-
----
-
-## Registering a new client app
-
-1. Add a `Client` entry in `src/DuendeAuth/Config.cs` → `GetClients()`
-2. Add its secret to `appsettings.Development.json` (gitignored)
-3. In the new app, point `Auth:Authority` at `https://localhost:5001`
-
----
-
-## Switching databases
-
-| Provider | `Database:Provider` value |
-|---|---|
-| SQLite (default, dev) | `"sqlite"` |
-| PostgreSQL | `"postgres"` |
-| SQL Server | `"sqlserver"` |
-
-Connection strings and provider value go in `appsettings.json`. Credentials go in `appsettings.Development.json` (gitignored) or environment variables — never hardcoded.
+Rate limit: 100 requests per minute per client (fixed window). Exceeding the limit returns HTTP 429.
 
 ---
 
 ## Links
 
 - [Duende IdentityServer docs](https://docs.duendesoftware.com/identityserver/v7)
+- [ASP.NET Core Identity docs](https://learn.microsoft.com/en-us/aspnet/core/security/authentication/identity)
+- [Scalar API reference](https://scalar.com)
 - [Standards](https://github.com/paurodriguez0220/standards)
 
 ---
-*Maintained by paurodriguez0220 · Last updated: 2026-06-15*
-*Standards: https://github.com/paurodriguez0220/standards*
+*Maintained by paurodriguez0220 · Last updated: 2026-06-18*
+*Standards: https://github.com/paurodriguez0220/standards-docs*
